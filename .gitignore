@@ -1,0 +1,21 @@
+# Data files (contain PHI)
+*.xlsx
+*.csv
+
+# Output
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+*.code-workspace
+.vscode/
+.idea/
+
+# OS
+.DS_Store
