@@ -30,30 +30,30 @@ Input text
 [1] Regex pre-processing  (fast, deterministic)
     ├─ HN / AN / VN  →  [HOSPITAL_IDS]
     ├─ 13-digit national ID (bare + dashed)  →  [NATIONAL_ID]
-    ├─ Thai-titled names: นาย/นาง/นางสาว/เด็กชาย/เด็กหญิง/ด.ช./ด.ญ./นพ./พญ.  →  [PERSON]
-    ├─ Relative names: มารดา/บิดา/สามี/ภรรยา/บุตร/ผู้ดูแล + name  →  [PERSON]
+    ├─ Thai-titled names (nai/nang/nangsaw/dekkai/dekyling/nph/phya...)  →  [PERSON]
+    ├─ Relative names (marada/bida/sami/phanraya/but/phuduai + name)  →  [PERSON]
     ├─ English-titled names: Mr./Mrs./Miss/Ms./Dr./Prof.  →  [PERSON]
-    ├─ Phone (labeled): โทร/เบอร์โทร/มือถือ/ติดต่อ/Tel/Mobile/Fax/HP  →  [PHONE]
+    ├─ Phone (labeled with Thai/English prefix)  →  [PHONE]
     ├─ Phone (standalone mobile 06x/08x/09x with/without separators)  →  [PHONE]
     ├─ Phone (Bangkok landline 02-XXXX-XXXX)  →  [PHONE]
     ├─ Phone (provincial landline 0XX-XXX-XXXX)  →  [PHONE]
     ├─ Phone (+66 international format)  →  [PHONE]
-    ├─ LINE ID (ไลน์/LINE prefix required)  →  [PERSON]
+    ├─ LINE ID (Thai/English prefix required)  →  [PERSON]
     ├─ Email  →  [EMAIL]
-    └─ Thai digits ๐-๙  →  normalized to 0-9
+    └─ Thai digit normalization (Thai numerals to Arabic)
     │
     ▼
 [2] NER model inference  (loolootech/no-name-ner-th)
     ├─ Batched token classification (batch_size=64 on GPU, 16 on CPU)
-    ├─ Sub-token merging (B-/I- tags → full spans)
+    ├─ Sub-token merging (B-/I- tags -> full spans)
     └─ Only entities in ENTITY_MAP are kept (DATE suppressed)
     │
     ▼
 [3] False-positive suppression
-    ├─ Medical eponym blocklist (80+ terms: Foley, Tenckhoff, Candida, Rankin…)
-    ├─ Organism genus rule: [A-Z][a-z]+(us|ia|coccus|bacillus…) → not PERSON
-    ├─ English medical verb blocklist (retain, wean, extubate, taper…)
-    ├─ Low-confidence short-span filter: PERSON score < 0.70 AND span ≤ 3 chars
+    ├─ Medical eponym blocklist (80+ terms: Foley, Tenckhoff, Candida, Rankin...)
+    ├─ Organism genus rule: [A-Z][a-z]+(us|ia|coccus|bacillus...) -> not PERSON
+    ├─ English medical verb blocklist (retain, wean, extubate, taper...)
+    ├─ Low-confidence short-span filter: PERSON score < 0.70 AND span <= 3 chars
     └─ ADDRESS suppression: institution prefix OR < 2 structural components
     │
     ▼
@@ -69,26 +69,24 @@ De-identified text
 ## Example
 
 **Before:**
-```
-นายสมชาย ใจดี 55 ปี  HN 37838/59
-Tel: 081-234-5678  LINE ID: somchai.md
-มารดา นางสมหญิง ใจงาม
-Known case DM, HT
-เลขบัตรประชาชน 3-1001-04566-72-1
-ส่งต่อ พญ.วิภา แผนกอายุรกรรม รพ.จุฬาลงกรณ์
-```
+
+> นายสมชาย ใจดี 55 ปี  HN 37838/59  
+> Tel: 081-234-5678  LINE ID: somchai.md  
+> มารดา นางสมหญิง ใจงาม  
+> Known case DM, HT  
+> เลขบัตรประชาชน 3-1001-04566-72-1  
+> ส่งต่อ พญ.วิภา แผนกอายุรกรรม รพ.จุฬาลงกรณ์
 
 **After:**
-```
-[PERSON] 55 ปี  HN [HOSPITAL_IDS]
-Tel: [PHONE]  LINE ID: [PERSON]
-มารดา [PERSON]
-Known case DM, HT
-เลขบัตรประชาชน [NATIONAL_ID]
-ส่งต่อ [PERSON] แผนกอายุรกรรม รพ.จุฬาลงกรณ์
-```
 
-Note: `รพ.จุฬาลงกรณ์` is correctly NOT redacted — institution names are excluded from ADDRESS detection.
+> [PERSON] 55 ปี  HN [HOSPITAL_IDS]  
+> Tel: [PHONE]  LINE ID: [PERSON]  
+> มารดา [PERSON]  
+> Known case DM, HT  
+> เลขบัตรประชาชน [NATIONAL_ID]  
+> ส่งต่อ [PERSON] แผนกอายุรกรรม รพ.จุฬาลงกรณ์
+
+Note: รพ.จุฬาลงกรณ์ is correctly NOT redacted — institution names are excluded from ADDRESS detection.
 
 ---
 
@@ -210,10 +208,10 @@ Catches all future genera without per-species blocklist entries.
 ### ADDRESS suppression
 
 NER-detected ADDRESS spans are suppressed if:
-1. An institution keyword appears within ±30 characters (`โรงพยาบาล`, `คลินิก`, `แผนก`, `ICU`, `ward`…), OR
-2. Fewer than 2 structural Thai address components are present (`หมู่`, `ซอย`, `ถนน`, `ตำบล`/`แขวง`, `อำเภอ`/`เขต`, `จังหวัด`, postal code)
+1. An institution keyword appears within ±30 characters (โรงพยาบาล, คลินิก, แผนก, ICU, ward…), OR
+2. Fewer than 2 structural Thai address components are present (หมู่, ซอย, ถนน, ตำบล/แขวง, อำเภอ/เขต, จังหวัด, postal code)
 
-Single geographic words (`เขตบางรัก`, `จ.เชียงใหม่` alone) are not flagged.
+Single geographic words (เขตบางรัก, จ.เชียงใหม่ alone) are not flagged.
 
 ---
 
@@ -236,7 +234,7 @@ Memory: 25,000-row chunks with incremental CSV write — stable at < 8 GB RAM.
 
 - Names without a title prefix rely entirely on the NER model and may be missed
 - Very short spans (≤3 chars) with score < 0.70 are suppressed to reduce noise
-- `โทร` as a verb ("called to inform") is not flagged — only `โทร` followed by digits within 8 characters is treated as a phone prefix
+- โทร as a verb ("called to inform") is not flagged — only โทร followed by digits within 8 characters is treated as a phone prefix
 - NER model license (CC BY-NC 4.0) restricts commercial use
 
 ---
