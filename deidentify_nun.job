@@ -1,0 +1,71 @@
+#!/bin/sh
+#SBATCH --job-name=deiden_nun
+#SBATCH --time=12:00:00
+#SBATCH -p gpu
+#SBATCH --gres=gpu:7g.40gb:1
+#SBATCH --qos=gpu40g
+#SBATCH --output=/data/scratch/%u/%j/deiden_%j.out
+#SBATCH --error=/data/scratch/%u/%j/deiden_%j.err
+
+# ---------------------------------------------------------------
+# De-identification job for nun.xlsx
+#
+# BEFORE FIRST RUN — on the login node:
+#   mkdir -p ~/deiden
+#   scp nun.xlsx deidentify_nun.py deidentify_nun.job <user>@cuaim-frontend1:~/deiden/
+#   echo "hf_YOURTOKEN" > ~/.hf_token   # store HuggingFace token once
+#
+# SUBMIT:
+#   sbatch ~/deiden/deidentify_nun.job
+#
+# MONITOR:
+#   squeue -u $USER
+#   tail -f /data/scratch/$USER/<JOBID>/deiden_<JOBID>.out
+#
+# RESUME (if job times out): just resubmit — checkpoint picks up where it left off
+# ---------------------------------------------------------------
+
+WORKDIR=/data/scratch/${USER}/${SLURM_JOB_ID}
+mkdir -p ${WORKDIR}
+
+# EDIT: path where you uploaded nun.xlsx and deidentify_nun.py
+DATADIR=/home/${USER}/deiden
+
+# Copy inputs to fast scratch storage
+cp ${DATADIR}/nun.xlsx          ${WORKDIR}/
+cp ${DATADIR}/deidentify_nun.py ${WORKDIR}/
+
+# Carry over checkpoint if resuming
+[ -f ${DATADIR}/nun_checkpoint.json ] && cp ${DATADIR}/nun_checkpoint.json ${WORKDIR}/
+
+export SINGULARITY_BIND="/data/scratch,/home"
+
+# HuggingFace token (stored once on login node — never hardcode here)
+export HF_TOKEN=$(cat ~/.hf_token 2>/dev/null || echo "")
+export HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+
+echo "=== Job started : $(date) ==="
+echo "=== Node        : $(hostname) ==="
+echo "=== WORKDIR     : ${WORKDIR} ==="
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true
+
+cd ${WORKDIR}
+
+# Install missing packages into user home (persists across jobs)
+singularity exec --nv /data/container_image/pytorch.sif \
+    pip install -q --user transformers sentencepiece pandas openpyxl tqdm huggingface_hub
+
+# Run de-identification
+singularity exec --nv /data/container_image/pytorch.sif \
+    python3 deidentify_nun.py
+
+EXIT_CODE=$?
+echo "=== Job finished: $(date) — exit code ${EXIT_CODE} ==="
+
+# Copy outputs back to home
+cp ${WORKDIR}/nun_deidentified.xlsx  ${DATADIR}/ && echo "Saved: nun_deidentified.xlsx"
+cp ${WORKDIR}/nun_detections_log.csv ${DATADIR}/ && echo "Saved: nun_detections_log.csv"
+# Always copy checkpoint (allows resume if exit code != 0)
+cp ${WORKDIR}/nun_checkpoint.json    ${DATADIR}/ 2>/dev/null && echo "Saved: checkpoint"
+
+exit ${EXIT_CODE}
