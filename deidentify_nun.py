@@ -46,7 +46,7 @@ SHEET_CSV_FILES = {
 }
 OUTPUT_FILE = "nun_deidentified.xlsx"
 CHECKPOINT_FILE = "nun_checkpoint.json"
-PIPELINE_VERSION = "v3-2026-05"  # bump whenever regex/model logic changes to force re-run
+PIPELINE_VERSION = "v4-2026-05-gazetteer"  # bump whenever regex/model logic changes to force re-run
 
 SHEET_TEXT_COLUMNS = {
     "Admission_Record": [
@@ -201,6 +201,73 @@ EMAIL_PATTERN = re.compile(
     r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}'
 )
 
+# ── Thai name gazetteer (PyThaiNLP) ──────────────────────────────────────────
+def _load_thai_name_corpora() -> tuple[set[str], set[str]]:
+    """Load Thai first-name and family-name sets from PyThaiNLP.
+
+    Returns (first_names, family_names). Returns empty sets if PyThaiNLP
+    is unavailable or its corpora cannot be downloaded — pipeline degrades
+    gracefully to NER-only behaviour.
+    """
+    try:
+        from pythainlp.corpus.common import (
+            thai_male_names,
+            thai_female_names,
+            thai_family_names,
+        )
+        firsts = thai_male_names() | thai_female_names()
+        families = thai_family_names()
+        # Drop very short tokens (≤2 chars) — too collision-prone with common Thai words
+        firsts = {n for n in firsts if len(n) >= 3}
+        families = {n for n in families if len(n) >= 3}
+        return firsts, families
+    except Exception as exc:  # ImportError, corpus download failure, etc.
+        print(f"WARNING: PyThaiNLP name corpora unavailable ({exc}); "
+              "Thai full-name gazetteer disabled.")
+        return set(), set()
+
+
+_THAI_FIRST_NAMES, _THAI_FAMILY_NAMES = _load_thai_name_corpora()
+
+# Thai-script token (3-15 chars) — used to tokenize text for sliding-window
+# pair detection. Sliding-window beats a fixed pair regex because re.sub
+# consumes failed matches and would skip 'A B C' pairs when only B-C is real.
+_THAI_TOKEN_RE = re.compile(r'[ก-๙]{3,15}')
+
+
+def _gazetteer_replace_thai_name_pair(text: str) -> str:
+    """Mask Thai untitled full-name pairs (first + family) using the gazetteer.
+
+    Conservative: requires BOTH halves to match the corpora (in either order)
+    so common Thai phrases don't get redacted. Catches patterns like
+    'ปฐวี คมกฤช' that the NER model misses.
+    """
+    if not _THAI_FIRST_NAMES or not _THAI_FAMILY_NAMES:
+        return text
+
+    firsts = _THAI_FIRST_NAMES
+    families = _THAI_FAMILY_NAMES
+
+    tokens = list(_THAI_TOKEN_RE.finditer(text))
+    spans: list[tuple[int, int]] = []
+
+    i = 0
+    while i < len(tokens) - 1:
+        t1, t2 = tokens[i], tokens[i + 1]
+        gap = text[t1.end(): t2.start()]
+        if gap and gap.strip() == "":
+            a, b = t1.group(), t2.group()
+            if (a in firsts and b in families) or (a in families and b in firsts):
+                spans.append((t1.start(), t2.end()))
+                i += 2
+                continue
+        i += 1
+
+    for start, end in reversed(spans):
+        text = text[:start] + "[PERSON]" + text[end:]
+    return text
+
+
 # ── Thai-titled names (personal + professional) ───────────────────────────────
 THAI_TITLE_PATTERN = re.compile(
     r'(?:'
@@ -261,6 +328,10 @@ def regex_preprocess(text: str) -> str:
     text = THAI_TITLE_PATTERN.sub('[PERSON]', text)
     text = RELATIVE_NAME_PATTERN.sub('[PERSON]', text)
     text = NAME_ENGLISH_TITLE_PATTERN.sub('[PERSON]', text)
+
+    # Untitled Thai full-name pairs via gazetteer (catches NER misses
+    # like 'ปฐวี คมกฤช' that have no preceding title)
+    text = _gazetteer_replace_thai_name_pair(text)
 
     return text
 

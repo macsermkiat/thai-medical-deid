@@ -3,3 +3,4 @@ sentencepiece
 pandas
 openpyxl
 tqdm
+pythainlp

@@ -1,6 +1,6 @@
 # Thai Medical Text De-identification
 
-A production-grade de-identification pipeline for Thai hospital clinical notes. Detects and masks Personal Health Information (PHI) using a **two-layer hybrid approach**: regex pre-processing for structured identifiers + NER model ([loolootech/no-name-ner-th](https://huggingface.co/loolootech/no-name-ner-th)) for free-text PHI.
+A production-grade de-identification pipeline for Thai hospital clinical notes. Detects and masks Personal Health Information (PHI) using a **three-layer hybrid approach**: regex pre-processing for structured identifiers + a Thai full-name gazetteer (PyThaiNLP) for untitled names + an NER model ([loolootech/no-name-ner-th](https://huggingface.co/loolootech/no-name-ner-th)) for the long tail.
 
 Built for mixed Thai/English progress notes across OPD, IPD, and Radiology sheets. Runs on CPU or GPU (A100 tested via Slurm).
 
@@ -40,7 +40,10 @@ Input text
     ├─ Phone (+66 international format)  →  [PHONE]
     ├─ LINE ID (Thai/English prefix required)  →  [PERSON]
     ├─ Email  →  [EMAIL]
-    └─ Thai digit normalization (Thai numerals to Arabic)
+    ├─ Thai digit normalization (Thai numerals to Arabic)
+    └─ Thai full-name gazetteer (PyThaiNLP first + family corpora)  →  [PERSON]
+        - Catches untitled names like "ปฐวี คมกฤช"
+        - Conservative: requires BOTH halves to match (either order)
     │
     ▼
 [2] NER model inference  (loolootech/no-name-ner-th)
@@ -107,10 +110,11 @@ Note: รพ.จุฬาลงกรณ์ is correctly NOT redacted — instit
 ### Local / Colab
 
 ```bash
-pip install transformers[torch] sentencepiece pandas tqdm
+pip install -r requirements.txt
+# transformers[torch] sentencepiece pandas openpyxl tqdm pythainlp
 ```
 
-Python 3.9+, ~500 MB disk for model download on first run.
+Python 3.9+, ~500 MB disk for the NER model + ~few MB for PyThaiNLP name corpora (downloaded on first run).
 
 ### HPC Cluster (Slurm + Singularity)
 
@@ -205,6 +209,17 @@ Automatically suppresses capitalized Latin genus names matching:
 
 Catches all future genera without per-species blocklist entries.
 
+### Thai full-name gazetteer (PyThaiNLP)
+
+Many real names — especially uncommon Thai surnames like `คมกฤช` — are missed by the NER model when no title prefix (`นาย`, `พญ.`, etc.) is present. To recover these without sacrificing precision, the pipeline uses **PyThaiNLP**'s name corpora as a deterministic post-regex layer:
+
+- Sources: `thai_male_names()`, `thai_female_names()`, `thai_family_names()` (~3 chars minimum to drop ambiguous tokens)
+- Scans Thai-script tokens (3–15 chars) with a sliding window
+- Masks an adjacent token pair only when **both** halves match the corpora — first+family OR family+first (some clinical notes flip the order)
+- Common Thai phrases (e.g. `ผู้ป่วยมา OPD`) are not flagged because at most one half — usually neither — appears in the name dictionaries
+
+Graceful fallback: if PyThaiNLP is unavailable, this layer is silently skipped and the pipeline reverts to the regex+NER behavior.
+
 ### ADDRESS suppression
 
 NER-detected ADDRESS spans are suppressed if:
@@ -232,7 +247,8 @@ Memory: 25,000-row chunks with incremental CSV write — stable at < 8 GB RAM.
 
 ## Known limitations
 
-- Names without a title prefix rely entirely on the NER model and may be missed
+- Names without a title prefix rely on the PyThaiNLP gazetteer + NER model. Pairs where neither token appears in the Thai name corpora are still missed
+- Single untitled names (one token only) are not gazetteer-masked to avoid false positives on common Thai words
 - Very short spans (≤3 chars) with score < 0.70 are suppressed to reduce noise
 - โทร as a verb ("called to inform") is not flagged — only โทร followed by digits within 8 characters is treated as a phone prefix
 - NER model license (CC BY-NC 4.0) restricts commercial use
