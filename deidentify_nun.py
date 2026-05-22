@@ -158,7 +158,7 @@ AGE_PATTERN = re.compile(r'อายุ\s*\d{1,3}\s*ปี')
 # Thai has no word spaces, so capture โรงพยาบาล/รพ. plus following Thai chars,
 # bounded by the next non-Thai char (space/digit/Latin/punct) and capped at 15.
 # May occasionally grab a trailing word or clip a long run-on name.
-PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)\s?[ก-๙]{0,15}')
+PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)[ ]?[ก-๙]{0,15}')
 
 # ── Administrative locations (province/district/subdistrict) ─────────────────
 # Full words are unambiguous. Abbreviations จ./อ./ต. require >=2 following Thai
@@ -166,8 +166,8 @@ PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)\s?[ก-�
 # or collide with the อ. (อาจารย์) person title. Note: a real "อ.<name>" teacher
 # reference will be masked here as [PLACE] rather than [PERSON] — still redacted.
 LOCATION_PATTERN = re.compile(
-    r'(?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง)\s?[ก-๙]{1,15}'
-    r'|(?:จ|อ|ต)\.\s?[ก-๙]{2,15}'
+    r'(?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง)[ ]?[ก-๙]{1,15}'
+    r'|(?:จ|อ|ต)\.[ ]?[ก-๙]{2,15}'
 )
 
 # ── Phone number building blocks ──────────────────────────────────────────────
