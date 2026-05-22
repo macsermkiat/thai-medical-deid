@@ -140,8 +140,8 @@ HN_PATTERN = re.compile(
     r'(?i)\bH[\s\-/]?N\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)'
 )
 # AN/VN share HN's shape: 4-8 digits, optional /YY suffix (e.g. 9117/68, 21114/67).
-AN_PATTERN = re.compile(r'(?i)\bAN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
-VN_PATTERN = re.compile(r'(?i)\bVN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
+AN_PATTERN = re.compile(r'\bAN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
+VN_PATTERN = re.compile(r'\bVN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
 
 # ── National ID ───────────────────────────────────────────────────────────────
 NATIONAL_ID_PATTERN = re.compile(r'(?<!\d)\d{13}(?!\d)')
@@ -158,7 +158,7 @@ AGE_PATTERN = re.compile(r'อายุ\s*\d{1,3}\s*ปี')
 # Thai has no word spaces, so capture โรงพยาบาล/รพ. plus following Thai chars,
 # bounded by the next non-Thai char (space/digit/Latin/punct) and capped at 15.
 # May occasionally grab a trailing word or clip a long run-on name.
-PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)[ก-๙]{0,15}')
+PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)\s?[ก-๙]{0,15}')
 
 # ── Administrative locations (province/district/subdistrict) ─────────────────
 # Full words are unambiguous. Abbreviations จ./อ./ต. require >=2 following Thai
@@ -166,8 +166,8 @@ PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)[ก-๙]{
 # or collide with the อ. (อาจารย์) person title. Note: a real "อ.<name>" teacher
 # reference will be masked here as [PLACE] rather than [PERSON] — still redacted.
 LOCATION_PATTERN = re.compile(
-    r'(?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง)[ก-๙]{1,15}'
-    r'|(?:จ|อ|ต)\.[ก-๙]{2,15}'
+    r'(?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง)\s?[ก-๙]{1,15}'
+    r'|(?:จ|อ|ต)\.\s?[ก-๙]{2,15}'
 )
 
 # ── Phone number building blocks ──────────────────────────────────────────────
