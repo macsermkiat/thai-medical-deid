@@ -139,9 +139,10 @@ _THAI_DIGIT_TABLE = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'
 HN_PATTERN = re.compile(
     r'(?i)\bH[\s\-/]?N\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)'
 )
-# AN/VN share HN's shape: 4-8 digits, optional /YY suffix (e.g. 9117/68, 21114/67).
-AN_PATTERN = re.compile(r'\bAN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
-VN_PATTERN = re.compile(r'\bVN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
+# AN/VN: keep (?i) for OCR/lowercase coverage but require an explicit separator
+# (colon, dot, semicolon, or dash) so the English article "an" never matches.
+AN_PATTERN = re.compile(r'(?i)\bAN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)')
+VN_PATTERN = re.compile(r'(?i)\bVN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)')
 
 # ── National ID ───────────────────────────────────────────────────────────────
 NATIONAL_ID_PATTERN = re.compile(r'(?<!\d)\d{13}(?!\d)')
