@@ -139,18 +139,13 @@ _THAI_DIGIT_TABLE = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'
 HN_PATTERN = re.compile(
     r'(?i)\bH[\s\-/]?N\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)'
 )
-# AN/VN: two branches —
-#   1. explicit separator (any case): AN:9117/68, an-12345
-#   2. space-only but slash form required: AN 9117/68 (slash distinguishes IDs from years)
-# "an 2024 study" (English article + year, no slash) matches neither branch.
-AN_PATTERN = re.compile(
-    r'(?i)\bAN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)'
-    r'|\bAN\s+(\d{4,8}/\d{2,4})'
-)
-VN_PATTERN = re.compile(
-    r'(?i)\bVN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)'
-    r'|\bVN\s+(\d{4,8}/\d{2,4})'
-)
+# AN/VN: uppercase pattern is separator-optional (full original coverage: AN 12345, AN:9117/68).
+# A second case-insensitive pattern with required separator catches OCR/lowercase variants
+# (an:9117) without matching the English article "an" before a plain number.
+AN_PATTERN    = re.compile(r'\bAN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
+AN_PATTERN_CI = re.compile(r'(?i)\bAN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)')
+VN_PATTERN    = re.compile(r'\bVN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
+VN_PATTERN_CI = re.compile(r'(?i)\bVN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)')
 
 # ── National ID ───────────────────────────────────────────────────────────────
 NATIONAL_ID_PATTERN = re.compile(r'(?<!\d)\d{13}(?!\d)')
@@ -340,7 +335,9 @@ def regex_preprocess(text: str) -> str:
     # Hospital identifiers
     text = HN_PATTERN.sub(r'HN [HOSPITAL_IDS]', text)
     text = AN_PATTERN.sub(r'AN [HOSPITAL_IDS]', text)
+    text = AN_PATTERN_CI.sub(r'AN [HOSPITAL_IDS]', text)
     text = VN_PATTERN.sub(r'VN [HOSPITAL_IDS]', text)
+    text = VN_PATTERN_CI.sub(r'VN [HOSPITAL_IDS]', text)
 
     # Age (อายุ … ปี), place/hospital names, and administrative locations
     text = AGE_PATTERN.sub('อายุ [AGE] ปี', text)
