@@ -139,13 +139,35 @@ _THAI_DIGIT_TABLE = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'
 HN_PATTERN = re.compile(
     r'(?i)\bH[\s\-/]?N\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)'
 )
-AN_PATTERN = re.compile(r'(?i)\bAN\s*[\.:;\-]?\s*(\d{6,12})')
-VN_PATTERN = re.compile(r'(?i)\bVN\s*[\.:;\-]?\s*(\d{6,12})')
+# AN/VN share HN's shape: 4-8 digits, optional /YY suffix (e.g. 9117/68, 21114/67).
+AN_PATTERN = re.compile(r'(?i)\bAN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
+VN_PATTERN = re.compile(r'(?i)\bVN\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)')
 
 # ── National ID ───────────────────────────────────────────────────────────────
 NATIONAL_ID_PATTERN = re.compile(r'(?<!\d)\d{13}(?!\d)')
 NATIONAL_ID_DASHED  = re.compile(
     r'(?<!\d)\d{1}[-\s]\d{4}[-\s]\d{5}[-\s]\d{2}[-\s]\d{1}(?!\d)'
+)
+
+# ── Age ─────────────────────────────────────────────────────────────────────
+# Anchored on อายุ … ปี so we don't redact every "N ปี" (durations, etc.).
+# Space between number and ปี is sometimes missing (e.g. "อายุ 54ปี").
+AGE_PATTERN = re.compile(r'อายุ\s*\d{1,3}\s*ปี')
+
+# ── Place / hospital names ──────────────────────────────────────────────────
+# Thai has no word spaces, so capture โรงพยาบาล/รพ. plus following Thai chars,
+# bounded by the next non-Thai char (space/digit/Latin/punct) and capped at 15.
+# May occasionally grab a trailing word or clip a long run-on name.
+PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)[ก-๙]{0,15}')
+
+# ── Administrative locations (province/district/subdistrict) ─────────────────
+# Full words are unambiguous. Abbreviations จ./อ./ต. require >=2 following Thai
+# chars so they don't eat month/day abbreviations (ต.ค.=Oct, จ.=Mon, อ.=Tue)
+# or collide with the อ. (อาจารย์) person title. Note: a real "อ.<name>" teacher
+# reference will be masked here as [PLACE] rather than [PERSON] — still redacted.
+LOCATION_PATTERN = re.compile(
+    r'(?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง)[ก-๙]{1,15}'
+    r'|(?:จ|อ|ต)\.[ก-๙]{2,15}'
 )
 
 # ── Phone number building blocks ──────────────────────────────────────────────
@@ -306,6 +328,11 @@ def regex_preprocess(text: str) -> str:
     text = HN_PATTERN.sub(r'HN [HOSPITAL_IDS]', text)
     text = AN_PATTERN.sub(r'AN [HOSPITAL_IDS]', text)
     text = VN_PATTERN.sub(r'VN [HOSPITAL_IDS]', text)
+
+    # Age (อายุ … ปี), place/hospital names, and administrative locations
+    text = AGE_PATTERN.sub('อายุ [AGE] ปี', text)
+    text = PLACE_PATTERN.sub('[PLACE]', text)
+    text = LOCATION_PATTERN.sub('[PLACE]', text)
 
     # National ID
     text = NATIONAL_ID_DASHED.sub('[NATIONAL_ID]', text)
