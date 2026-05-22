@@ -139,10 +139,18 @@ _THAI_DIGIT_TABLE = str.maketrans('๐๑๒๓๔๕๖๗๘๙', '0123456789'
 HN_PATTERN = re.compile(
     r'(?i)\bH[\s\-/]?N\s*[\.:;\-]?\s*(\d{4,8}(?:/\d{2,4})?)'
 )
-# AN/VN: keep (?i) for OCR/lowercase coverage but require an explicit separator
-# (colon, dot, semicolon, or dash) so the English article "an" never matches.
-AN_PATTERN = re.compile(r'(?i)\bAN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)')
-VN_PATTERN = re.compile(r'(?i)\bVN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)')
+# AN/VN: two branches —
+#   1. explicit separator (any case): AN:9117/68, an-12345
+#   2. space-only but slash form required: AN 9117/68 (slash distinguishes IDs from years)
+# "an 2024 study" (English article + year, no slash) matches neither branch.
+AN_PATTERN = re.compile(
+    r'(?i)\bAN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)'
+    r'|\bAN\s+(\d{4,8}/\d{2,4})'
+)
+VN_PATTERN = re.compile(
+    r'(?i)\bVN\s*[\.:;\-]\s*(\d{4,8}(?:/\d{2,4})?)'
+    r'|\bVN\s+(\d{4,8}/\d{2,4})'
+)
 
 # ── National ID ───────────────────────────────────────────────────────────────
 NATIONAL_ID_PATTERN = re.compile(r'(?<!\d)\d{13}(?!\d)')
@@ -158,8 +166,12 @@ AGE_PATTERN = re.compile(r'อายุ\s*\d{1,3}\s*ปี')
 # ── Place / hospital names ──────────────────────────────────────────────────
 # Thai has no word spaces, so capture โรงพยาบาล/รพ. plus following Thai chars,
 # bounded by the next non-Thai char (space/digit/Latin/punct) and capped at 15.
-# May occasionally grab a trailing word or clip a long run-on name.
-PLACE_PATTERN = re.compile(r'(?:โรงพยาบาล|รพ\.?)(?:[ ][ก-๙]{1,15}|[ก-๙]{0,15})')
+# รพ must be followed by "." or " " to avoid matching inside words like การพยาบาล.
+PLACE_PATTERN = re.compile(
+    r'โรงพยาบาล(?:[ ][ก-๙]{1,15}|[ก-๙]{0,15})'
+    r'|รพ\.(?:[ ][ก-๙]{1,15}|[ก-๙]{0,15})'
+    r'|รพ[ ][ก-๙]{1,15}'
+)
 
 # ── Administrative locations (province/district/subdistrict) ─────────────────
 # Full words are unambiguous. Abbreviations จ./อ./ต. require >=2 following Thai
