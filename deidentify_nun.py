@@ -311,13 +311,6 @@ THAI_TITLE_PATTERN = re.compile(
     r'([ก-๙a-zA-Z][ก-๙a-zA-Z\s]{1,30})',
 )
 
-# ── Relative names ────────────────────────────────────────────────────────────
-RELATIVE_NAME_PATTERN = re.compile(
-    r'(?:มารดา|บิดา|สามี|ภรรยา|บุตร|ผู้ดูแล)\s+'
-    r'(?:นางสาว|นาง|นาย|เด็กชาย|เด็กหญิง)?\s*'
-    r'([ก-๙][ก-๙\s]{2,30})',
-)
-
 # ── English-titled names ──────────────────────────────────────────────────────
 NAME_ENGLISH_TITLE_PATTERN = re.compile(
     r'(?:Mrs?\.|Miss|Ms\.|Dr\.|Prof\.)\s+'
@@ -361,9 +354,10 @@ def regex_preprocess(text: str) -> str:
     text = PHONE_BKK_BARE.sub('[PHONE]', text)
     text = PHONE_PROV_BARE.sub('[PHONE]', text)
 
-    # Named persons — titles anchor these patterns
+    # Named persons — titles anchor these patterns. Relative-name detection
+    # (มารดา/บิดา/บุตร …) is delegated to the NER model: the regex greedily
+    # grabbed trailing narrative as a name (e.g. "บุตร" + non-name text).
     text = THAI_TITLE_PATTERN.sub('[PERSON]', text)
-    text = RELATIVE_NAME_PATTERN.sub('[PERSON]', text)
     text = NAME_ENGLISH_TITLE_PATTERN.sub('[PERSON]', text)
 
     # Untitled Thai full-name pairs via gazetteer (catches NER misses
