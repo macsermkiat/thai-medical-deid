@@ -163,19 +163,18 @@ AGE_PATTERN = re.compile(r'อายุ\s*\d{1,3}\s*ปี')
 # bounded by the next non-Thai char (space/digit/Latin/punct) and capped at 15.
 # รพ must be followed by "." or " " to avoid matching inside words like การพยาบาล.
 PLACE_PATTERN = re.compile(
-    r'โรงพยาบาล(?:[ ][ก-๙]{1,15}|[ก-๙]{0,15})'
-    r'|รพ\.(?:[ ][ก-๙]{1,15}|[ก-๙]{0,15})'
-    r'|รพ[ ][ก-๙]{1,15}'
+    r'((?:โรงพยาบาล|รพ\.)[ ]?)([ก-๙]{0,15})'
+    r'|(รพ[ ])([ก-๙]{1,15})'
 )
 
 # ── Administrative locations (province/district/subdistrict) ─────────────────
-# Full words are unambiguous. Abbreviations จ./อ./ต. require >=2 following Thai
-# chars so they don't eat month/day abbreviations (ต.ค.=Oct, จ.=Mon, อ.=Tue)
-# or collide with the อ. (อาจารย์) person title. Note: a real "อ.<name>" teacher
-# reference will be masked here as [PLACE] rather than [PERSON] — still redacted.
+# Prefix (group 1) is kept; only the trailing place name (group 2) is redacted.
+# Abbreviations require >=2 following Thai chars so they don't eat month
+# abbreviations (ต.ค.=Oct). อ. is intentionally EXCLUDED here: in these clinical
+# notes "อ.<name>" is overwhelmingly อาจารย์ (a person title), so it is handled
+# by THAI_TITLE_PATTERN as อ.[PERSON] rather than mislabelled as a place.
 LOCATION_PATTERN = re.compile(
-    r'(?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง)[ ]?[ก-๙]{1,15}'
-    r'|(?:จ|อ|ต)\.[ ]?[ก-๙]{2,15}'
+    r'((?:จังหวัด|อำเภอ|ตำบล|เขต|แขวง|จ\.|ต\.)[ ]?)([ก-๙]{2,15})'
 )
 
 # ── Phone number building blocks ──────────────────────────────────────────────
@@ -218,10 +217,17 @@ PHONE_PROV_BARE = re.compile(rf'(?<!\d)({_PROV})(?!\d)')
 PHONE_PAREN = re.compile(rf'\(0\d{{1,2}}\){_S}\d{{3,4}}{_S}\d{{3,4}}')
 
 # ── LINE ID ───────────────────────────────────────────────────────────────────
+# Require a real anchor after the keyword — an explicit ID word, a ':'/'='
+# separator, or an '@' handle. A bare space (old behaviour) matched the "line"
+# inside common English words (borderline, baseline, central line) and ate the
+# following word as a fake handle.
 LINE_ID_PATTERN = re.compile(
-    r'(?:ไลน์|LINE|Line)'
-    r'(?:\s*(?:ID|ไอดี|id))?'
-    r'\s*[:=]?\s*'
+    r'(?:ไลน์|\bLINE\b)'
+    r'(?:'
+    r'\s*(?:ID\b|ไอดี)\s*[:=]?\s*'   # explicit ID word
+    r'|\s*[:=]\s*'                    # or a ':'/'=' separator
+    r'|\s*(?=@)'                      # or an '@' handle immediately after
+    r')'
     r'(@?[a-zA-Z0-9][a-zA-Z0-9._\-]{2,19})',
     re.IGNORECASE,
 )
@@ -300,29 +306,44 @@ def _gazetteer_replace_thai_name_pair(text: str) -> str:
 
 # ── Thai-titled names (personal + professional) ───────────────────────────────
 THAI_TITLE_PATTERN = re.compile(
-    r'(?:'
+    r'((?:'
     r'นางสาว|นาง|นาย'
     r'|เด็กชาย|เด็กหญิง'
     r'|ด\.(?:ช|ญ)\.'
     r'|(?:รศ|ผศ|ศ)\.(?:นพ|พญ)\.'
     r'|(?:นพ|พญ)\.'
     r'|อ\.'
-    r')\s*'
+    r')\s*)'
     r'([ก-๙a-zA-Z][ก-๙a-zA-Z\s]{1,30})',
-)
-
-# ── Relative names ────────────────────────────────────────────────────────────
-RELATIVE_NAME_PATTERN = re.compile(
-    r'(?:มารดา|บิดา|สามี|ภรรยา|บุตร|ผู้ดูแล)\s+'
-    r'(?:นางสาว|นาง|นาย|เด็กชาย|เด็กหญิง)?\s*'
-    r'([ก-๙][ก-๙\s]{2,30})',
 )
 
 # ── English-titled names ──────────────────────────────────────────────────────
 NAME_ENGLISH_TITLE_PATTERN = re.compile(
-    r'(?:Mrs?\.|Miss|Ms\.|Dr\.|Prof\.)\s+'
+    r'((?:Mrs?\.|Miss|Ms\.|Dr\.|Prof\.)\s+)'
     r'([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})'
 )
+
+
+def _keep_prefix(token: str):
+    """Substitution that preserves a structural prefix (group 1) and redacts
+    only the trailing name (group 2), e.g. 'อ.สมชาย' -> 'อ.[PERSON]'."""
+    def repl(m):
+        name = m.group(2)
+        if name and name.strip():
+            return m.group(1) + token
+        return m.group(0)
+    return repl
+
+
+def _place_repl(m):
+    """PLACE_PATTERN has two prefix/name group pairs (1,2) and (3,4)."""
+    if m.group(1) is not None:
+        prefix, name = m.group(1), m.group(2)
+    else:
+        prefix, name = m.group(3), m.group(4)
+    if name and name.strip():
+        return prefix + '[PLACE]'
+    return m.group(0)
 
 
 def regex_preprocess(text: str) -> str:
@@ -341,8 +362,8 @@ def regex_preprocess(text: str) -> str:
 
     # Age (อายุ … ปี), place/hospital names, and administrative locations
     text = AGE_PATTERN.sub('อายุ [AGE] ปี', text)
-    text = PLACE_PATTERN.sub('[PLACE]', text)
-    text = LOCATION_PATTERN.sub('[PLACE]', text)
+    text = PLACE_PATTERN.sub(_place_repl, text)
+    text = LOCATION_PATTERN.sub(_keep_prefix('[PLACE]'), text)
 
     # National ID
     text = NATIONAL_ID_DASHED.sub('[NATIONAL_ID]', text)
@@ -361,10 +382,11 @@ def regex_preprocess(text: str) -> str:
     text = PHONE_BKK_BARE.sub('[PHONE]', text)
     text = PHONE_PROV_BARE.sub('[PHONE]', text)
 
-    # Named persons — titles anchor these patterns
-    text = THAI_TITLE_PATTERN.sub('[PERSON]', text)
-    text = RELATIVE_NAME_PATTERN.sub('[PERSON]', text)
-    text = NAME_ENGLISH_TITLE_PATTERN.sub('[PERSON]', text)
+    # Named persons — titles anchor these patterns. Relative-name detection
+    # (มารดา/บิดา/บุตร …) is delegated to the NER model: the regex greedily
+    # grabbed trailing narrative as a name (e.g. "บุตร" + non-name text).
+    text = THAI_TITLE_PATTERN.sub(_keep_prefix('[PERSON]'), text)
+    text = NAME_ENGLISH_TITLE_PATTERN.sub(_keep_prefix('[PERSON]'), text)
 
     # Untitled Thai full-name pairs via gazetteer (catches NER misses
     # like 'ปฐวี คมกฤช' that have no preceding title)
@@ -433,6 +455,12 @@ def _is_suppressed(span: str, label: str, score: float, text: str, start: int, e
     return False
 
 
+# Regex-inserted replacement tokens, e.g. [PERSON], [PHONE], [HOSPITAL_IDS].
+# The NER model otherwise re-tags the literal token text ("PERSON", "PHONE")
+# as entities and corrupts them on replacement, so these regions are protected.
+_PLACEHOLDER_RE = re.compile(r'\[[A-Z_]+\]')
+
+
 def anonymize_batch(ner_pipeline, texts: list) -> list:
     preprocessed = [
         regex_preprocess(t) if t and isinstance(t, str) else t
@@ -460,11 +488,15 @@ def anonymize_batch(ner_pipeline, texts: list) -> list:
             continue
 
         merged   = merge_entities(ner_results[i])
+        protected = [(m.start(), m.end()) for m in _PLACEHOLDER_RE.finditer(text)]
         detected = []
         anonymized = text
 
         for start, end, label, score in reversed(merged):
             if label not in ENTITY_MAP:
+                continue
+            # Skip spans overlapping a regex-inserted placeholder token.
+            if any(start < pe and ps < end for ps, pe in protected):
                 continue
             original_span = text[start:end]
             if _is_suppressed(original_span, label, score, text, start, end):
