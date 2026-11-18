@@ -336,12 +336,20 @@ CLINICIAN_TITLE_STOPWORDS = frozenset((
     'กรณี', 'คิด', 'นึกถึง', 'ร่วม', 'แพทย์', 'หน่วย', 'แนะนำ', 'เช็ดตัว',
     'ต้อง', 'ติด', 'เปิด', 'ปิด', 'กายภาพ', 'ฉีด', 'เก็บ', 'วาง', 'ดังนี้',
     'ผสม', 'คีย์', 'ทีม', 'กรอก', 'ถ้า', 'เกี่ยว', 'จิตเวช', 'เหน็บ', 'คือ',
-    'อยาก',
+    'อยาก', 'มี', 'อนุมัติ', 'ผ่าตัด', 'รักษา', 'ปฏิเสธ', 'ตัดสินใจ', 'ห้อง',
+    'ห้าม', 'อาวุโส', 'นิติเวช', 'สภา', 'พี่เลี้ยง', 'สัมภาษณ์',
+    # A title already in the note ('แพทย์ นพ.[PERSON]') stays readable.
+    'นพ.', 'พญ.', 'ผศ.', 'รศ.', 'ศ.',
 ))
+# Same-line separators only: a title ending a line must not mask the next
+# line's first word. U+200B is a common invisible Thai word break.
 _TITLE_RE = re.compile(
-    r'(?:แพทย์|เเพทย์|(?<![A-Za-z])(?:R[1-4]|F[1-3]|Fellow))\s*(?=[ก-ฮเ-ไ])'
+    r'(?:(?:แพทย์|เเพทย์)(?:เวร|เจ้าของไข้|ประจำบ้าน)?'
+    r'|(?<![A-Za-z])(?:[Rr][1-4]|[Ff][1-3]|[Ff]ellow))'
+    r'[ \t\xa0\u200b]*(?=[ก-ฮเ-ไ])'
 )
 _NAME_CHAR = re.compile(r'[ก-ฺเ-ํ]')
+_SURNAME_GAP = re.compile(r'[ \t\xa0\u200b]+')
 _NAME_MAX = 20
 
 
@@ -352,14 +360,39 @@ def _longest_prefix(text: str, words: frozenset | set) -> int:
     )
 
 
+def _clinician_name_end(text: str, start: int) -> int:
+    """End of the name that starts at ``start``, or ``start`` if none.
+
+    A gazetteer first name is the minimum; the name then runs on to the next
+    stop word or non-letter, at most _NAME_MAX characters. Without a
+    gazetteer anchor only stop words of 3+ characters end the name, so a
+    2-character stop word inside a name ('อุมาวดี') does not cut it short.
+    A gazetteer surname after a space is included.
+    """
+    gaz = _longest_prefix(text[start:start + _NAME_MAX], _THAI_FIRST_NAMES)
+    end = start + gaz
+    while end < start + _NAME_MAX and end < len(text) and _NAME_CHAR.match(text[end]):
+        stop = _longest_prefix(text[end:end + _NAME_MAX], CLINICIAN_TITLE_STOPWORDS)
+        if end - start >= 2 and stop and (gaz or stop >= 3):
+            break
+        end += 1
+    if end - start < 2:
+        return start
+    gap = _SURNAME_GAP.match(text, end)
+    if gap:
+        family = _longest_prefix(text[gap.end():gap.end() + _NAME_MAX], _THAI_FAMILY_NAMES)
+        if family:
+            end = gap.end() + family
+    return end
+
+
 def _mask_clinician_title_names(text: str) -> str:
-    """Mask a first name after a clinician title, keeping the title.
+    """Mask a name after a clinician title, keeping the title.
 
     'แพทย์' (and its common misspelling 'เเพทย์') is mostly an ordinary noun
     in nurse notes, so a following known word is left alone. A gazetteer
     first name longer than that word wins ('แพทย์มาลี' is a name, 'แพทย์มาดู'
-    is not). Otherwise the name runs to the next stop word or non-letter,
-    at most _NAME_MAX characters. Issue: blood_audit #273.
+    is not). Issue: blood_audit #273.
     """
     out, pos = [], 0
     for m in _TITLE_RE.finditer(text):
@@ -368,18 +401,10 @@ def _mask_clinician_title_names(text: str) -> str:
             continue
         tail = text[start:start + _NAME_MAX]
         stop = _longest_prefix(tail, CLINICIAN_TITLE_STOPWORDS)
-        gaz = _longest_prefix(tail, _THAI_FIRST_NAMES)
-        if stop >= gaz and stop:
+        if stop and stop >= _longest_prefix(tail, _THAI_FIRST_NAMES):
             continue
-        if gaz:
-            end = start + gaz
-        else:
-            end = start
-            while end < start + _NAME_MAX and end < len(text) and _NAME_CHAR.match(text[end]):
-                if end - start >= 2 and _longest_prefix(text[end:], CLINICIAN_TITLE_STOPWORDS):
-                    break
-                end += 1
-        if end - start < 2:
+        end = _clinician_name_end(text, start)
+        if end == start:
             continue
         out.append(text[pos:start])
         out.append('[PERSON]')
@@ -458,11 +483,13 @@ def regex_preprocess(text: str) -> str:
     # grabbed trailing narrative as a name (e.g. "บุตร" + non-name text).
     text = THAI_TITLE_PATTERN.sub(_keep_prefix('[PERSON]'), text)
     text = NAME_ENGLISH_TITLE_PATTERN.sub(_keep_prefix('[PERSON]'), text)
-    text = _mask_clinician_title_names(text)
 
     # Untitled Thai full-name pairs via gazetteer (catches NER misses
     # like 'ปฐวี คมกฤช' that have no preceding title)
     text = _gazetteer_replace_thai_name_pair(text)
+
+    # After the pair pass, so a titled full name is masked whole.
+    text = _mask_clinician_title_names(text)
 
     return text
 
