@@ -46,7 +46,7 @@ SHEET_CSV_FILES = {
 }
 OUTPUT_FILE = "nun_deidentified.xlsx"
 CHECKPOINT_FILE = "nun_checkpoint.json"
-PIPELINE_VERSION = "v6-2026-11-bare-por-title"  # bump whenever regex/model logic changes to force re-run
+PIPELINE_VERSION = "v7-2026-11-glued-dotted-por-rn"  # bump whenever regex/model logic changes to force re-run
 
 SHEET_TEXT_COLUMNS = {
     "Admission_Record": [
@@ -341,14 +341,21 @@ CLINICIAN_TITLE_STOPWORDS = frozenset((
     # A title already in the note ('แพทย์ นพ.[PERSON]') stays readable.
     'นพ.', 'พญ.', 'ผศ.', 'รศ.', 'ศ.',
 ))
+# Words seen glued to a doctor's พ. ("แจ้งพ.<name>"), IPDNRFOCUSDT 2026-11-19.
+_GLUED_BEFORE_POR = (
+    'แจ้ง', 'กับ', 'ให้', 'รอ', 'เช้า', 'บ่าย', 'และ', 'ตาม', 'ของ', 'เวลา',
+    'ช่วย', 'พบ', 'ถาม', 'บอก', 'ติดต่อ', 'จาก', 'ที่', 'ว่า', 'ขณะ', 'พร้อม',
+    'มา', 'แพทย์', 'วิสัญญี', 'ไข้', 'ทาง',
+)
 # Same-line separators only: a title ending a line must not mask the next
 # line's first word. U+200B is a common invisible Thai word break.
-# Bare พ. is a doctor only on its own: after a letter (รพ., สภาพ.) or a
-# dotted letter (ร.พ.) it ends another word.
+# Bare พ. is a doctor only on its own or after a _GLUED_BEFORE_POR word: after
+# another letter (รพ., สภาพ.) or a dotted letter (ร.พ.) it ends another word.
 _TITLE_RE = re.compile(
     r'(?:(?:แพทย์|เเพทย์)(?:เวร|เจ้าของไข้|ประจำบ้าน)?'
     r'|(?<![A-Za-z])(?:[Rr][1-4]|[Ff][1-3]|[Ff]ellow)'
-    r'|(?<![ก-๙])(?<![ก-ฮ]\.)พ\.)'
+    r'|น\.พ\.'
+    r'|(?:(?<![ก-๙])(?<![ก-ฮ]\.)|' + '|'.join(f'(?<={w})' for w in _GLUED_BEFORE_POR) + r')พ\.)'
     r'[ \t\xa0\u200b]*(?=[ก-ฮเ-ไ])'
 )
 _NAME_CHAR = re.compile(r'[ก-ฺเ-ํ]')
@@ -414,6 +421,14 @@ def _mask_clinician_title_names(text: str) -> str:
         pos = end
     out.append(text[pos:])
     return ''.join(out)
+
+
+# ── Nurse signatures ──────────────────────────────────────────────────────
+# "<name> <surname> RN5" ends a note. Up to two Thai words before RN/PN and
+# a level digit; a word glued to an upstream [PERSON] is the rest of a name.
+NURSE_SIGNATURE_PATTERN = re.compile(
+    r'(?<![ก-๙])[ก-๙]+(?:[ \t\xa0]+[ก-๙]+)?(?=[ \t\xa0]*(?:R[Nn]|PN)[ \t.]?\d)'
+)
 
 
 # ── English-titled names ──────────────────────────────────────────────────────
@@ -493,6 +508,7 @@ def regex_preprocess(text: str) -> str:
 
     # After the pair pass, so a titled full name is masked whole.
     text = _mask_clinician_title_names(text)
+    text = NURSE_SIGNATURE_PATTERN.sub('[PERSON]', text)
 
     return text
 
