@@ -46,7 +46,7 @@ SHEET_CSV_FILES = {
 }
 OUTPUT_FILE = "nun_deidentified.xlsx"
 CHECKPOINT_FILE = "nun_checkpoint.json"
-PIPELINE_VERSION = "v4-2026-05-gazetteer"  # bump whenever regex/model logic changes to force re-run
+PIPELINE_VERSION = "v5-2026-11-clinician-titles"  # bump whenever regex/model logic changes to force re-run
 
 SHEET_TEXT_COLUMNS = {
     "Admission_Record": [
@@ -317,6 +317,102 @@ THAI_TITLE_PATTERN = re.compile(
     r'([ก-๙a-zA-Z][ก-๙a-zA-Z\s]{1,30})',
 )
 
+# ── Clinician role titles (แพทย์, residents, fellows) ──────────────────────
+# Words that follow a doctor title in KCMH nurse notes as ordinary text
+# ("รายงานแพทย์รับทราบ", "R1เวร"). Survey of 150k IPDNRFOCUSDT rows, 2026-11-18.
+CLINICIAN_TITLE_STOPWORDS = frozenset((
+    'ให้', 'นัด', 'เจ้าของ', 'รับทราบ', 'ทราบ', 'เวร', 'ทันที', 'มา', 'มื้อ',
+    'แจ้ง', 'ทำ', 'หาก', 'ก่อน', 'คุย', 'สั่ง', 'ประเมิน', 'วิสัญญี', 'และ',
+    'ขีด', 'เมื่อ', 'โทร', 'ปรับ', 'พิจารณา', 'จึง', 'ยัง', 'ดูแล', 'เพื่อ',
+    'จะ', 'แล้ว', 'ที่', 'ดู', 'ตาม', 'พา', 'เรื่อง', 'ฟัง', 'อนุญาต', 'ได้',
+    'ทุก', 'ประจำ', 'ผู้', 'เฉพาะ', 'ศัลย', 'อายุร', 'กุมาร', 'สูติ', 'ออร์โธ',
+    'ระบบ', 'โรค', 'จักษุ', 'รังสี', 'ฉุกเฉิน', 'เจาะ', 'ใส่', 'ถอด', 'เปลี่ยน',
+    'ตรวจ', 'เยี่ยม', 'รับ', 'ส่ง', 'อธิบาย', 'ยืนยัน', 'ไม่', 'ว่า', 'อีก',
+    'ทาง', 'หัวหน้า', 'พยาบาล', 'ใช้', 'เข้า', 'ออก', 'ขอ', 'สอบถาม', 'เห็น',
+    'บอก', 'งด', 'หยุด', 'เพิ่ม', 'ลด', 'วินิจฉัย', 'ระบุ', 'บันทึก', 'ลง',
+    'เขียน', 'กลับ', 'อยู่', 'กำลัง', 'ยา', 'เลือด', 'เวชศาสตร์', 'แผน',
+    'ทั่วไป', 'นักศึกษา', 'ทำแผล', 'สาย', 'เพิ่มเติม', 'ต่อ', 'ซึ่ง', 'หรือ',
+    'กับ', 'ใน', 'จาก', 'คน', 'ท่าน', 'แต่', 'ขณะ', 'หลัง', 'ระหว่าง', 'โดย',
+    'กรณี', 'คิด', 'นึกถึง', 'ร่วม', 'แพทย์', 'หน่วย', 'แนะนำ', 'เช็ดตัว',
+    'ต้อง', 'ติด', 'เปิด', 'ปิด', 'กายภาพ', 'ฉีด', 'เก็บ', 'วาง', 'ดังนี้',
+    'ผสม', 'คีย์', 'ทีม', 'กรอก', 'ถ้า', 'เกี่ยว', 'จิตเวช', 'เหน็บ', 'คือ',
+    'อยาก', 'มี', 'อนุมัติ', 'ผ่าตัด', 'รักษา', 'ปฏิเสธ', 'ตัดสินใจ', 'ห้อง',
+    'ห้าม', 'อาวุโส', 'นิติเวช', 'สภา', 'พี่เลี้ยง', 'สัมภาษณ์',
+    # A title already in the note ('แพทย์ นพ.[PERSON]') stays readable.
+    'นพ.', 'พญ.', 'ผศ.', 'รศ.', 'ศ.',
+))
+# Same-line separators only: a title ending a line must not mask the next
+# line's first word. U+200B is a common invisible Thai word break.
+_TITLE_RE = re.compile(
+    r'(?:(?:แพทย์|เเพทย์)(?:เวร|เจ้าของไข้|ประจำบ้าน)?'
+    r'|(?<![A-Za-z])(?:[Rr][1-4]|[Ff][1-3]|[Ff]ellow))'
+    r'[ \t\xa0\u200b]*(?=[ก-ฮเ-ไ])'
+)
+_NAME_CHAR = re.compile(r'[ก-ฺเ-ํ]')
+_SURNAME_GAP = re.compile(r'[ \t\xa0\u200b]+')
+_NAME_MAX = 20
+
+
+def _longest_prefix(text: str, words: frozenset | set) -> int:
+    return next(
+        (n for n in range(min(len(text), _NAME_MAX), 1, -1) if text[:n] in words),
+        0,
+    )
+
+
+def _clinician_name_end(text: str, start: int) -> int:
+    """End of the name that starts at ``start``, or ``start`` if none.
+
+    A gazetteer first name is the minimum; the name then runs on to the next
+    stop word or non-letter, at most _NAME_MAX characters. Without a
+    gazetteer anchor only stop words of 3+ characters end the name, so a
+    2-character stop word inside a name ('อุมาวดี') does not cut it short.
+    A gazetteer surname after a space is included.
+    """
+    gaz = _longest_prefix(text[start:start + _NAME_MAX], _THAI_FIRST_NAMES)
+    end = start + gaz
+    while end < start + _NAME_MAX and end < len(text) and _NAME_CHAR.match(text[end]):
+        stop = _longest_prefix(text[end:end + _NAME_MAX], CLINICIAN_TITLE_STOPWORDS)
+        if end - start >= 2 and stop and (gaz or stop >= 3):
+            break
+        end += 1
+    if end - start < 2:
+        return start
+    gap = _SURNAME_GAP.match(text, end)
+    if gap:
+        family = _longest_prefix(text[gap.end():gap.end() + _NAME_MAX], _THAI_FAMILY_NAMES)
+        if family:
+            end = gap.end() + family
+    return end
+
+
+def _mask_clinician_title_names(text: str) -> str:
+    """Mask a name after a clinician title, keeping the title.
+
+    'แพทย์' (and its common misspelling 'เเพทย์') is mostly an ordinary noun
+    in nurse notes, so a following known word is left alone. A gazetteer
+    first name longer than that word wins ('แพทย์มาลี' is a name, 'แพทย์มาดู'
+    is not). Issue: blood_audit #273.
+    """
+    out, pos = [], 0
+    for m in _TITLE_RE.finditer(text):
+        start = m.end()
+        if start < pos:
+            continue
+        tail = text[start:start + _NAME_MAX]
+        stop = _longest_prefix(tail, CLINICIAN_TITLE_STOPWORDS)
+        if stop and stop >= _longest_prefix(tail, _THAI_FIRST_NAMES):
+            continue
+        end = _clinician_name_end(text, start)
+        if end == start:
+            continue
+        out.append(text[pos:start])
+        out.append('[PERSON]')
+        pos = end
+    out.append(text[pos:])
+    return ''.join(out)
+
+
 # ── English-titled names ──────────────────────────────────────────────────────
 NAME_ENGLISH_TITLE_PATTERN = re.compile(
     r'((?:Mrs?\.|Miss|Ms\.|Dr\.|Prof\.)\s+)'
@@ -391,6 +487,9 @@ def regex_preprocess(text: str) -> str:
     # Untitled Thai full-name pairs via gazetteer (catches NER misses
     # like 'ปฐวี คมกฤช' that have no preceding title)
     text = _gazetteer_replace_thai_name_pair(text)
+
+    # After the pair pass, so a titled full name is masked whole.
+    text = _mask_clinician_title_names(text)
 
     return text
 
