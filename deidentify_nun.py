@@ -46,7 +46,7 @@ SHEET_CSV_FILES = {
 }
 OUTPUT_FILE = "nun_deidentified.xlsx"
 CHECKPOINT_FILE = "nun_checkpoint.json"
-PIPELINE_VERSION = "v5-2026-11-clinician-titles"  # bump whenever regex/model logic changes to force re-run
+PIPELINE_VERSION = "v6-2026-11-bare-por-title"  # bump whenever regex/model logic changes to force re-run
 
 SHEET_TEXT_COLUMNS = {
     "Admission_Record": [
@@ -343,9 +343,12 @@ CLINICIAN_TITLE_STOPWORDS = frozenset((
 ))
 # Same-line separators only: a title ending a line must not mask the next
 # line's first word. U+200B is a common invisible Thai word break.
+# Bare พ. is a doctor only on its own: after a letter (รพ., สภาพ.) or a
+# dotted letter (ร.พ.) it ends another word.
 _TITLE_RE = re.compile(
     r'(?:(?:แพทย์|เเพทย์)(?:เวร|เจ้าของไข้|ประจำบ้าน)?'
-    r'|(?<![A-Za-z])(?:[Rr][1-4]|[Ff][1-3]|[Ff]ellow))'
+    r'|(?<![A-Za-z])(?:[Rr][1-4]|[Ff][1-3]|[Ff]ellow)'
+    r'|(?<![ก-๙])(?<![ก-ฮ]\.)พ\.)'
     r'[ \t\xa0\u200b]*(?=[ก-ฮเ-ไ])'
 )
 _NAME_CHAR = re.compile(r'[ก-ฺเ-ํ]')

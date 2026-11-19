@@ -120,6 +120,18 @@ def test_hospital_after_por_is_not_a_person(note):
     assert "[PERSON]" not in d.regex_preprocess(note)
 
 
+@pytest.mark.parametrize(
+    "note",
+    [
+        # A word ending in พ before a full stop is not a title.
+        "สัญญาณชีพ.คงที่",
+        "ประเมินสภาพ.แผลแห้งดี",
+    ],
+)
+def test_word_ending_in_por_keeps_next_word(note):
+    assert d.regex_preprocess(note) == note
+
+
 def test_redacted_bare_por_is_stable():
     once = d.regex_preprocess("รายงาน พ.สมมติ ทราบ")
     assert d.regex_preprocess(once) == once == "รายงาน พ.[PERSON] ทราบ"
