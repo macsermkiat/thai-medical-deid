@@ -70,3 +70,56 @@ def test_keeps_ordinary_text_after_title(note):
 
 def test_existing_title_after_แพทย์_stays_readable():
     assert d.regex_preprocess("แจ้งแพทย์ นพ.สมชาย") == "แจ้งแพทย์ นพ.[PERSON]"
+
+
+# Bare "พ." is how nurse notes write a doctor ("รายงาน พ.<name> ทราบ"). The
+# names below are invented and stand for no real person.
+@pytest.mark.parametrize(
+    ("note", "expected"),
+    [
+        ("รายงาน พ.สมมติ ทราบ", "รายงาน พ.[PERSON] ทราบ"),
+        ("notify พ.ฆฌญฎ ให้ LPRC 2 unit", "notify พ.[PERSON] ให้ LPRC 2 unit"),
+        ("พ.ฆฌญฎรับทราบ", "พ.[PERSON]รับทราบ"),
+        ("รายงาน พ. สมมติ ทราบ", "รายงาน พ. [PERSON] ทราบ"),
+        # The titles that end in "พ." keep working.
+        ("แจ้ง นพ.สมมติ", "แจ้ง นพ.[PERSON]"),
+        ("แจ้ง รศ.นพ.สมมติ", "แจ้ง รศ.นพ.[PERSON]"),
+        ("แจ้ง พญ.สมมติ", "แจ้ง พญ.[PERSON]"),
+    ],
+)
+def test_masks_name_after_bare_por(note, expected):
+    assert d.regex_preprocess(note) == expected
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        # Dates and acts abbreviate with "พ." plus one letter and a dot.
+        "นัด 5 พ.ค. 68",
+        "วันที่ 12 พ.ย. 2568",
+        "พ.ศ.2568",
+        "พ. ศ. 2568",
+        "ตาม พ.ร.บ.สถานพยาบาล",
+    ],
+)
+def test_keeps_abbreviations_that_start_with_por(note):
+    assert d.regex_preprocess(note) == note
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        # "พ." inside a word or after a dotted letter is not a doctor title:
+        # รพ./ร.พ. is a hospital, which must not become a person.
+        "ส่งต่อรพ.สมมติ",
+        "ส่งต่อ ร.พ.สมมติ",
+        "รับย้ายจากรพ.ฆฌญฎ",
+    ],
+)
+def test_hospital_after_por_is_not_a_person(note):
+    assert "[PERSON]" not in d.regex_preprocess(note)
+
+
+def test_redacted_bare_por_is_stable():
+    once = d.regex_preprocess("รายงาน พ.สมมติ ทราบ")
+    assert d.regex_preprocess(once) == once == "รายงาน พ.[PERSON] ทราบ"
